@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
 # --- FastAPI App ---
 app = FastAPI(lifespan=lifespan)
 
-origins = ["*"]
+origins = ["https://incredible-khapse-09fe41.netlify.app"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -366,7 +366,7 @@ async def record_match_result(result: MatchResult, db: Session = Depends(get_db)
     if match_to_remove:
         current_matches.remove(match_to_remove)
 
-    matches_state.matches_json = json.dumps([m.dict() for m in new_matches])
+    matches_state.matches_json = json.dumps([m.dict() for m in current_matches])
     db.commit()
     return {"message": "Match result recorded successfully"}
 
