@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carom Tournament Manager</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+        }
+        .match-player {
+            font-weight: 500;
+        }
+        .vs {
+            color: #6c757d;
+            margin: 0 0.5rem;
+        }
+        .grid-header {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            white-space: nowrap;
+            padding: 0.5rem 0.25rem !important;
+        }
+        .withdrawn-player {
+            color: #6c757d;
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid p-4">
+        <header class="pb-3 mb-4 border-bottom">
+            <a href="/" class="d-flex align-items-center text-dark text-decoration-none">
+                <span class="fs-4"> Swiss Tournament Manager</span>
+            </a>
+        </header>
+
+        <div class="row">
+            <!-- Left Column -->
+            <div class="col-md-5">
+                <!-- Player Management -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">プレイヤー管理</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group mb-3">
+                            <input type="text" id="playerNameInput" class="form-control" placeholder="プレイヤー名">
+                            <button id="addPlayerButton" class="btn btn-primary">追加</button>
+                        </div>
+                        <div class="input-group mb-3">
+                            <input type="file" id="csvFileInput" class="form-control" accept=".csv">
+                            <button id="uploadCsvButton" class="btn btn-secondary">CSVで一括登録</button>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-muted">登録済みプレイヤー</h6>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover table-sm">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">ID</th>
+                                        <th scope="col">名前</th>
+                                        <th scope="col">勝ち点</th>
+                                        <th scope="col">Bye済</th>
+                                        <th scope="col">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="playerList">
+                                    <!-- Player rows will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rankings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">順位表</h5>
+                    </div>
+                    <div class="card-body">
+                         <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">順位</th>
+                                        <th scope="col">名前</th>
+                                        <th scope="col">勝ち点</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rankingList">
+                                    <!-- Ranking rows will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">トーナメント進行</h5>
+                        <span class="text-muted fs-6 fw-bold" id="roundDisplay">Round: 0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex gap-2 mb-3">
+                             <button id="shufflePlayersButton" class="btn btn-secondary">シャッフル</button>
+                             <button id="generateMatchesButton" class="btn btn-success">組み合わせ生成</button>
+                             <button id="resetTournamentButton" class="btn btn-danger ms-auto">トーナメントリセット</button>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-muted">現在の対戦</h6>
+                        <ul id="matchList" class="list-group">
+                            <!-- Match items will be inserted here -->
+                        </ul>
+                    </div>
+                </div>
+                 <!-- Match History Grid -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">対戦履歴</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="matchHistoryGrid" class="table-responsive">
+                            <!-- Grid will be generated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const playerNameInput = document.getElementById('playerNameInput');
+        const addPlayerButton = document.getElementById('addPlayerButton');
+        const playerList = document.getElementById('playerList');
+        const shufflePlayersButton = document.getElementById('shufflePlayersButton');
+        const generateMatchesButton = document.getElementById('generateMatchesButton');
+        const resetTournamentButton = document.getElementById('resetTournamentButton');
+        const matchList = document.getElementById('matchList');
+        const rankingList = document.getElementById('rankingList');
+        const roundDisplay = document.getElementById('roundDisplay');
+        const matchHistoryGrid = document.getElementById('matchHistoryGrid');
+        const csvFileInput = document.getElementById('csvFileInput');
+        const uploadCsvButton = document.getElementById('uploadCsvButton');
+
+        const API_BASE_URL = 'https://carom-tournament-backend.onrender.com';
+
+        // --- State Management ---
+        async function loadTournamentState() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/state`);
+                const state = await response.json();
+                roundDisplay.textContent = `Round: ${state.current_round}`;
+            } catch (error) {
+                console.error('Failed to load tournament state:', error);
+            }
+        }
+
+        // --- Player Management ---
+        async function loadPlayers() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/players`);
+                const players = await response.json();
+                playerList.innerHTML = '';
+                const sortedById = [...players].sort((a, b) => a.id - b.id);
+                sortedById.forEach(player => {
+                    const tr = document.createElement('tr');
+                    if (!player.is_active) {
+                        tr.classList.add('withdrawn-player');
+                    }
+                    tr.innerHTML = `
+                        <td>${player.id}</td>
+                        <td>${player.name}</td>
+                        <td>${player.points}</td>
+                        <td>${player.has_received_bye ? '✔️' : ''}</td>
+                        <td>
+                            <button class="btn btn-sm btn-warning withdraw-button" data-player-id="${player.id}" ${!player.is_active ? 'disabled' : ''}>
+                                棄権
+                            </button>
+                        </td>
+                    `;
+                    playerList.appendChild(tr);
+                });
+                updateRanking(players);
+                updateMatchHistoryGrid(players);
+            } catch (error) {
+                console.error('プレイヤーのロード中にエラーが発生しました:', error);
+            }
+        }
+
+        addPlayerButton.addEventListener('click', async () => {
+            const playerName = playerNameInput.value.trim();
+            if (playerName) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/players`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: playerName })
+                    });
+                    if (response.ok) {
+                        playerNameInput.value = '';
+                        await loadPlayers();
+                    } else {
+                        const errorData = await response.json();
+                        alert(`プレイヤーの追加に失敗しました: ${errorData.detail}`);
+                    }
+                } catch (error) {
+                    console.error('プレイヤーの追加中にエラーが発生しました:', error);
+                    alert('プレイヤーの追加中にエラーが発生しました。');
+                }
+            } else {
+                alert('プレイヤー名を入力してください。');
+            }
+        });
+        
+        playerNameInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                addPlayerButton.click();
+            }
+        });
+
+        uploadCsvButton.addEventListener('click', async () => {
+            const file = csvFileInput.files[0];
+            if (!file) {
+                alert('CSVファイルを選択してください。');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/players/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (response.ok) {
+                    csvFileInput.value = ''; // Clear the file input
+                    await loadPlayers();
+                    alert('プレイヤーが正常に登録されました。');
+                } else {
+                    const errorData = await response.json();
+                    alert(`CSVのアップロードに失敗しました: ${errorData.detail}`);
+                }
+            } catch (error) {
+                console.error('CSVのアップロード中にエラーが発生しました:', error);
+                alert('CSVのアップロード中にエラーが発生しました。');
+            }
+        });
+
+        playerList.addEventListener('click', async (event) => {
+            const button = event.target.closest('.withdraw-button');
+            if (button) {
+                const playerId = button.dataset.playerId;
+                const playerName = button.closest('tr').querySelector('td:nth-child(2)').textContent;
+                if (confirm(`${playerName}を棄権させますか？この操作は元に戻せません。`)) {
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/players/${playerId}/withdraw`, { method: 'POST' });
+                        if (response.ok) {
+                            await loadPlayers();
+                        } else {
+                            alert('棄権処理に失敗しました。');
+                        }
+                    } catch (error) {
+                        console.error('棄権処理中にエラーが発生しました:', error);
+                    }
+                }
+            }
+        });
+
+        // --- Tournament Management ---
+        shufflePlayersButton.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/players/shuffle`, { method: 'POST' });
+                if(response.ok) {
+                    await loadPlayers();
+                } else {
+                    alert('シャッフルに失敗しました。');
+                }
+            } catch (error) {
+                console.error('シャッフル中にエラーが発生しました:', error);
+            }
+        });
+
+        generateMatchesButton.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/matches/generate`, { method: 'POST' });
+                if(response.ok) {
+                    await loadMatches();
+                    await loadPlayers(); // Byeのポイント反映のため
+                    await loadTournamentState();
+                } else {
+                    const errorData = await response.json();
+                    alert(`組み合わせの生成に失敗しました: ${errorData.detail}`);
+                }
+            } catch (error) {
+                console.error('組み合わせの生成中にエラーが発生しました:', error);
+            }
+        });
+
+        async function loadMatches() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/matches`);
+                const matches = await response.json();
+                matchList.innerHTML = '';
+                if (matches.length === 0) {
+                    matchList.innerHTML = '<li class="list-group-item text-center">対戦はありません。</li>';
+                    return;
+                }
+                matches.forEach(match => {
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    if (match.player2) {
+                        li.innerHTML = `
+                            <div>
+                                <span class="match-player">${match.player1.name}</span>
+                                <span class="vs">vs</span>
+                                <span class="match-player">${match.player2.name}</span>
+                            </div>
+                            <div class="btn-group" role="group">
+                                <button class="btn btn-sm btn-outline-success winner-button" data-winner-id="${match.player1.id}" data-loser-id="${match.player2.id}">${match.player1.name} Win</button>
+                                <button class="btn btn-sm btn-outline-success winner-button" data-winner-id="${match.player2.id}" data-loser-id="${match.player1.id}">${match.player2.name} Win</button>
+                            </div>
+                        `;
+                    } else { // Bye
+                        li.innerHTML = `
+                            <div>
+                                <span class="match-player">${match.player1.name}</span>
+                                <span class="badge bg-secondary ms-2">Bye (不戦勝)</span>
+                            </div>
+                        `;
+                    }
+                    matchList.appendChild(li);
+                });
+            } catch (error) {
+                console.error('対戦のロード中にエラーが発生しました:', error);
+            }
+        }
+
+        matchList.addEventListener('click', async (event) => {
+            const button = event.target.closest('.winner-button');
+            if (button) {
+                button.disabled = true; 
+                const winnerId = parseInt(button.dataset.winnerId);
+                const loserId = parseInt(button.dataset.loserId);
+                try {
+                    const response = await fetch(`${API_BASE_URL}/matches/result`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ winner_id: winnerId, loser_id: loserId })
+                    });
+                    if (response.ok) {
+                        await loadPlayers();
+                        await loadMatches();
+                    } else {
+                        alert('結果の登録に失敗しました。');
+                        button.disabled = false;
+                    }
+                } catch (error) {
+                    console.error('結果の登録中にエラーが発生しました:', error);
+                    button.disabled = false;
+                }
+            }
+        });
+        
+        resetTournamentButton.addEventListener('click', async () => {
+            if (confirm('本当にトーナメントをリセットしますか？全てのプレイヤーと対戦記録が削除されます。')) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/reset`, { method: 'POST' });
+                    if (response.ok) {
+                        await loadPlayers();
+                        await loadMatches();
+                        await loadTournamentState();
+                        alert('トーナメントがリセットされました。');
+                    } else {
+                        alert('リセットに失敗しました。');
+                    }
+                } catch (error) {
+                    console.error('リセット中にエラーが発生しました:', error);
+                }
+            }
+        });
+
+        // --- UI Updates ---
+        function updateRanking(players) {
+            // 棄権していないプレイヤーのみで順位を生成
+            const activePlayers = players.filter(p => p.is_active);
+            const sortedPlayers = [...activePlayers].sort((a, b) => b.points - a.points);
+            rankingList.innerHTML = '';
+             if (sortedPlayers.length === 0) {
+                rankingList.innerHTML = '<tr><td colspan="3" class="text-center">活動中のプレイヤーがいません</td></tr>';
+                return;
+            }
+            sortedPlayers.forEach((player, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <th scope="row">${index + 1}</th>
+                    <td>${player.name}</td>
+                    <td>${player.points}</td>
+                `;
+                rankingList.appendChild(tr);
+            });
+        }
+
+        function updateMatchHistoryGrid(players) {
+            if (players.length < 2) {
+                matchHistoryGrid.innerHTML = '<p class="text-center text-muted">プレイヤーが2人以上になると表示されます。</p>';
+                return;
+            }
+            const sortedById = [...players].sort((a, b) => a.id - b.id);
+            let table = '<table class="table table-bordered text-center table-sm">';
+            table += '<thead><tr><th scope="col"></th>';
+            sortedById.forEach(p => {
+                table += `<th scope="col" class="grid-header"><div>${p.name}</div></th>`;
+            });
+            table += '</tr></thead>';
+            table += '<tbody>';
+            sortedById.forEach(p1 => {
+                const rowClass = p1.is_active ? '' : 'withdrawn-player';
+                table += `<tr><th scope="row" class="text-start ${rowClass}">${p1.name}</th>`;
+                sortedById.forEach(p2 => {
+                    if (p1.id === p2.id) {
+                        table += '<td class="bg-light"></td>';
+                    } else if (p1.wins_against.includes(p2.id)) {
+                        table += '<td>○</td>'; // p1 wins against p2
+                    } else if (p1.losses_against.includes(p2.id)) {
+                        table += '<td>×</td>'; // p1 loses against p2
+                    } else {
+                        table += '<td></td>'; // No match played
+                    }
+                });
+                table += '</tr>';
+            });
+            table += '</tbody></table>';
+            matchHistoryGrid.innerHTML = table;
+        }
+
+        // --- Initial Load ---
+        async function initialize() {
+            await loadPlayers();
+            await loadMatches();
+            await loadTournamentState();
+        }
+
+        initialize();
+
+    </script>
+</body>
+</html>
