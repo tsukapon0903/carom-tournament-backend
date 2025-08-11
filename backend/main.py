@@ -79,7 +79,7 @@ class Match(BaseModel):
 
 class MatchResult(BaseModel):
     winner_id: int
-    loser_id: int
+    loser_id: Optional[int] = None
 
 class TournamentState(BaseModel):
     current_round: int
@@ -329,43 +329,80 @@ async def get_matches(db: Session = Depends(get_db)):
 @app.post("/matches/result")
 async def record_match_result(result: MatchResult, db: Session = Depends(get_db)):
     winner = db.query(PlayerDB).filter(PlayerDB.id == result.winner_id).first()
-    loser = db.query(PlayerDB).filter(PlayerDB.id == result.loser_id).first()
 
-    if not winner or not loser:
-        raise HTTPException(status_code=404, detail="Player not found")
-
-    # Check if this match has already been recorded to prevent duplicate point additions
-    existing_record = db.query(MatchRecord).filter(
-        ((MatchRecord.winner_id == result.winner_id) & (MatchRecord.loser_id == result.loser_id)) |
-        ((MatchRecord.winner_id == result.loser_id) & (MatchRecord.loser_id == result.winner_id))
-    ).first()
-
-    if not existing_record:
-        winner.points += 1
-        # The played_opponents association is now mainly for tracking who has played whom,
-        # regardless of win/loss, which is useful for pairing logic.
-        if loser not in winner.played_opponents:
-             winner.played_opponents.append(loser)
-        if winner not in loser.played_opponents:
-             loser.played_by.append(winner)
-        
-        new_match_record = MatchRecord(winner_id=result.winner_id, loser_id=result.loser_id)
-        db.add(new_match_record)
-
+    # Check if the match being recorded is a bye match
+    is_bye_match_in_current_matches = False
     matches_state = db.query(CurrentMatchesDB).first()
     current_matches = [Match(**m) for m in json.loads(matches_state.matches_json)]
     
-    match_to_remove = None
+    bye_match_to_remove = None
     for match in current_matches:
-        if match.player2 and (
-            (match.player1.id == winner.id and match.player2.id == loser.id) or
-            (match.player1.id == loser.id and match.player2.id == winner.id)
-        ):
-            match_to_remove = match
+        if match.player2 is None and match.player1.id == result.winner_id:
+            is_bye_match_in_current_matches = True
+            bye_match_to_remove = match
             break
-    if match_to_remove:
-        current_matches.remove(match_to_remove)
 
+    if is_bye_match_in_current_matches:
+        # If it's a bye match, we don't need a loser.
+        # We just need to remove it from current_matches.
+        if not winner:
+            raise HTTPException(status_code=404, detail="Winner player not found for bye.")
+        
+        # Remove the bye match from current_matches
+        if bye_match_to_remove:
+            current_matches.remove(bye_match_to_remove)
+        
+        # No points or played_opponents update needed here for bye, as it's done during generation.
+        # No MatchRecord for bye.
+
+    else:
+        # This is a regular match, so we need a valid loser.
+        loser = db.query(PlayerDB).filter(PlayerDB.id == result.loser_id).first()
+        if not winner or not loser:
+            raise HTTPException(status_code=404, detail="Player not found for regular match.")
+
+        # Check if this match has already been recorded to prevent duplicate point additions
+        existing_record = db.query(MatchRecord).filter(
+            ((MatchRecord.winner_id == result.winner_id) & (MatchRecord.loser_id == result.loser_id)) |
+            ((MatchRecord.winner_id == result.loser_id) & (MatchRecord.loser_id == result.winner_id))
+        ).first()
+
+        if not existing_record:
+            winner.points += 1
+            if loser not in winner.played_opponents:
+                 winner.played_opponents.append(loser)
+            if winner not in loser.played_opponents:
+                 loser.played_by.append(winner)
+            
+            new_match_record = MatchRecord(winner_id=result.winner_id, loser_id=result.loser_id)
+            db.add(new_match_record)
+
+        # Remove the regular match from current_matches
+        match_to_remove = None
+        for match in current_matches:
+            if match.player2 and (
+                (match.player1.id == winner.id and match.player2.id == loser.id) or
+                (match.player1.id == loser.id and match.player2.id == winner.id)
+            ):
+                match_to_remove = match
+                break
+        if match_to_remove:
+            current_matches.remove(match_to_remove)
+
+    # Check if only bye matches are left
+    only_byes_left = True
+    if not current_matches:
+        only_byes_left = False
+    else:
+        for match in current_matches:
+            if match.player2 is not None:
+                only_byes_left = False
+                break
+    
+    if only_byes_left:
+        current_matches = []
+
+    # Save the updated current_matches back to DB
     matches_state.matches_json = json.dumps([m.dict() for m in current_matches])
     db.commit()
     return {"message": "Match result recorded successfully"}
