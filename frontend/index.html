@@ -168,10 +168,10 @@
         async function loadPlayers() {
             try {
                 const response = await fetch(`${API_BASE_URL}/players`);
-                const players = await response.json();
+                const players = await response.json(); // players are already sorted by display_order from API
                 playerList.innerHTML = '';
-                const sortedById = [...players].sort((a, b) => a.id - b.id);
-                sortedById.forEach(player => {
+                // const sortedById = [...players].sort((a, b) => a.id - b.id); // This line is removed
+                players.forEach(player => { // Use the 'players' array directly
                     const tr = document.createElement('tr');
                     if (!player.is_active) {
                         tr.classList.add('withdrawn-player');
