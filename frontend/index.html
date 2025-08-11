@@ -152,11 +152,32 @@
         const uploadCsvButton = document.getElementById('uploadCsvButton');
 
         const API_BASE_URL = 'https://carom-tournament-api.onrender.com';
+        let authToken = sessionStorage.getItem('tournamentAuthToken');
+
+        // --- API Fetch Wrapper ---
+        async function apiFetch(url, options = {}) {
+            const headers = {
+                ...options.headers,
+                'X-Auth-Token': authToken,
+            };
+
+            const response = await fetch(url, { ...options, headers });
+
+            if (response.status === 401) {
+                sessionStorage.removeItem('tournamentAuthToken');
+                authToken = null;
+                alert("認証に失敗しました。パスワードが間違っているか、設定されていません。ページを再読み込みして、再度パスワードを入力してください。");
+                document.body.innerHTML = '<div class="alert alert-danger">認証エラー。ページを再読み込みしてください。</div>';
+                throw new Error("Authentication failed");
+            }
+            
+            return response;
+        }
 
         // --- State Management ---
         async function loadTournamentState() {
             try {
-                const response = await fetch(`${API_BASE_URL}/state`);
+                const response = await apiFetch(`${API_BASE_URL}/state`);
                 const state = await response.json();
                 roundDisplay.textContent = `Round: ${state.current_round}`;
             } catch (error) {
@@ -167,11 +188,10 @@
         // --- Player Management ---
         async function loadPlayers() {
             try {
-                const response = await fetch(`${API_BASE_URL}/players`);
-                const players = await response.json(); // players are already sorted by display_order from API
+                const response = await apiFetch(`${API_BASE_URL}/players`);
+                const players = await response.json();
                 playerList.innerHTML = '';
-                // const sortedById = [...players].sort((a, b) => a.id - b.id); // This line is removed
-                players.forEach(player => { // Use the 'players' array directly
+                players.forEach(player => {
                     const tr = document.createElement('tr');
                     if (!player.is_active) {
                         tr.classList.add('withdrawn-player');
@@ -200,7 +220,7 @@
             const playerName = playerNameInput.value.trim();
             if (playerName) {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/players`, {
+                    const response = await apiFetch(`${API_BASE_URL}/players`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: playerName })
@@ -238,7 +258,7 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/players/upload`, {
+                const response = await apiFetch(`${API_BASE_URL}/players/upload`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -264,7 +284,7 @@
                 const playerName = button.closest('tr').querySelector('td:nth-child(2)').textContent;
                 if (confirm(`${playerName}を棄権させますか？この操作は元に戻せません。`)) {
                     try {
-                        const response = await fetch(`${API_BASE_URL}/players/${playerId}/withdraw`, { method: 'POST' });
+                        const response = await apiFetch(`${API_BASE_URL}/players/${playerId}/withdraw`, { method: 'POST' });
                         if (response.ok) {
                             await loadPlayers();
                         } else {
@@ -280,7 +300,7 @@
         // --- Tournament Management ---
         shufflePlayersButton.addEventListener('click', async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/players/shuffle`, { method: 'POST' });
+                const response = await apiFetch(`${API_BASE_URL}/players/shuffle`, { method: 'POST' });
                 if(response.ok) {
                     await loadPlayers();
                 } else {
@@ -293,7 +313,7 @@
 
         generateMatchesButton.addEventListener('click', async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/matches/generate`, { method: 'POST' });
+                const response = await apiFetch(`${API_BASE_URL}/matches/generate`, { method: 'POST' });
                 if(response.ok) {
                     await loadMatches();
                     await loadPlayers(); // Byeのポイント反映のため
@@ -309,7 +329,7 @@
 
         async function loadMatches() {
             try {
-                const response = await fetch(`${API_BASE_URL}/matches`);
+                const response = await apiFetch(`${API_BASE_URL}/matches`);
                 const matches = await response.json();
                 matchList.innerHTML = '';
                 if (matches.length === 0) {
@@ -353,7 +373,7 @@
                 const winnerId = parseInt(button.dataset.winnerId);
                 const loserId = parseInt(button.dataset.loserId);
                 try {
-                    const response = await fetch(`${API_BASE_URL}/matches/result`, {
+                    const response = await apiFetch(`${API_BASE_URL}/matches/result`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ winner_id: winnerId, loser_id: loserId })
@@ -375,7 +395,7 @@
         resetTournamentButton.addEventListener('click', async () => {
             if (confirm('本当にトーナメントをリセットしますか？全てのプレイヤーと対戦記録が削除されます。')) {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/reset`, { method: 'POST' });
+                    const response = await apiFetch(`${API_BASE_URL}/reset`, { method: 'POST' });
                     if (response.ok) {
                         await loadPlayers();
                         await loadMatches();
@@ -392,7 +412,6 @@
 
         // --- UI Updates ---
         function updateRanking(players) {
-            // 棄権していないプレイヤーのみで順位を生成
             const activePlayers = players.filter(p => p.is_active);
             const sortedPlayers = [...activePlayers].sort((a, b) => b.points - a.points);
             rankingList.innerHTML = '';
@@ -431,11 +450,11 @@
                     if (p1.id === p2.id) {
                         table += '<td class="bg-light"></td>';
                     } else if (p1.wins_against.includes(p2.id)) {
-                        table += '<td>○</td>'; // p1 wins against p2
+                        table += '<td>○</td>';
                     } else if (p1.losses_against.includes(p2.id)) {
-                        table += '<td>×</td>'; // p1 loses against p2
+                        table += '<td>×</td>';
                     } else {
-                        table += '<td></td>'; // No match played
+                        table += '<td></td>';
                     }
                 });
                 table += '</tr>';
@@ -446,6 +465,15 @@
 
         // --- Initial Load ---
         async function initialize() {
+            if (!authToken) {
+                authToken = prompt("パスワードを入力してください:");
+                if (authToken) {
+                    sessionStorage.setItem('tournamentAuthToken', authToken);
+                } else {
+                    document.body.innerHTML = '<div class="alert alert-danger">認証が必要です。ページを再読み込みしてください。</div>';
+                    return;
+                }
+            }
             await loadPlayers();
             await loadMatches();
             await loadTournamentState();

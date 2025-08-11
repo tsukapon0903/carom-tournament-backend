@@ -1,6 +1,6 @@
 import json
 import random
-from fastapi import FastAPI, HTTPException, Depends, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
@@ -110,6 +110,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Password Protection ---
+SECRET_PASSWORD = "3cushion-lover"
+
+async def verify_password(x_auth_token: str = Header(...)):
+    if x_auth_token != SECRET_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid or missing authentication token")
+
+PROTECTED_DEPENDENCY = Depends(verify_password)
+
+
 # --- DB Dependency ---
 def get_db():
     db = SessionLocal()
@@ -146,12 +156,12 @@ def enrich_player_data(players_db: List[PlayerDB], db: Session) -> List[Player]:
 async def read_root():
     return {"message": "Carom Tournament API is running with SQLite backend!"}
 
-@app.get("/state", response_model=TournamentState)
+@app.get("/state", response_model=TournamentState, dependencies=[PROTECTED_DEPENDENCY])
 async def get_tournament_state(db: Session = Depends(get_db)):
     state = db.query(TournamentInfo).first()
     return TournamentState(current_round=state.current_round)
 
-@app.post("/players", response_model=Player)
+@app.post("/players", response_model=Player, dependencies=[PROTECTED_DEPENDENCY])
 async def create_player(player_data: PlayerCreate, db: Session = Depends(get_db)):
     db_player = db.query(PlayerDB).filter(PlayerDB.name == player_data.name).first()
     if db_player:
@@ -173,7 +183,7 @@ async def create_player(player_data: PlayerCreate, db: Session = Depends(get_db)
     db.refresh(new_player_db)
     return convert_player_to_pydantic(new_player_db)
 
-@app.post("/players/upload", response_model=List[Player])
+@app.post("/players/upload", response_model=List[Player], dependencies=[PROTECTED_DEPENDENCY])
 async def upload_players_csv(file: UploadFile, db: Session = Depends(get_db)):
     if file.content_type not in ["text/csv", "application/vnd.ms-excel"]:
         raise HTTPException(status_code=400, detail="Invalid file type. Please upload a CSV file.")
@@ -220,12 +230,12 @@ async def upload_players_csv(file: UploadFile, db: Session = Depends(get_db)):
 
     return created_players
 
-@app.get("/players", response_model=List[Player])
+@app.get("/players", response_model=List[Player], dependencies=[PROTECTED_DEPENDENCY])
 async def get_players(db: Session = Depends(get_db)):
     players_db = db.query(PlayerDB).order_by(PlayerDB.display_order).all()
     return enrich_player_data(players_db, db)
 
-@app.post("/players/{player_id}/withdraw", response_model=Player)
+@app.post("/players/{player_id}/withdraw", response_model=Player, dependencies=[PROTECTED_DEPENDENCY])
 async def withdraw_player(player_id: int, db: Session = Depends(get_db)):
     player_db = db.query(PlayerDB).filter(PlayerDB.id == player_id).first()
     if not player_db:
@@ -241,7 +251,7 @@ async def withdraw_player(player_id: int, db: Session = Depends(get_db)):
     player_pydantic.losses_against = [l.winner_id for l in losses]
     return player_pydantic
 
-@app.post("/players/shuffle", response_model=List[Player])
+@app.post("/players/shuffle", response_model=List[Player], dependencies=[PROTECTED_DEPENDENCY])
 async def shuffle_players(db: Session = Depends(get_db)):
     players_db = db.query(PlayerDB).filter(PlayerDB.is_active == True).all()
     random.shuffle(players_db)
@@ -254,7 +264,7 @@ async def shuffle_players(db: Session = Depends(get_db)):
     shuffled_players_db = db.query(PlayerDB).order_by(PlayerDB.display_order).all()
     return enrich_player_data(shuffled_players_db, db)
 
-@app.post("/matches/generate", response_model=List[Match])
+@app.post("/matches/generate", response_model=List[Match], dependencies=[PROTECTED_DEPENDENCY])
 async def generate_matches(db: Session = Depends(get_db)):
     matches_state = db.query(CurrentMatchesDB).first()
     if json.loads(matches_state.matches_json):
@@ -320,13 +330,13 @@ async def generate_matches(db: Session = Depends(get_db)):
     db.commit()
     return new_matches
 
-@app.get("/matches", response_model=List[Match])
+@app.get("/matches", response_model=List[Match], dependencies=[PROTECTED_DEPENDENCY])
 async def get_matches(db: Session = Depends(get_db)):
     matches_state = db.query(CurrentMatchesDB).first()
     matches_dict = json.loads(matches_state.matches_json)
     return [Match(**m) for m in matches_dict]
 
-@app.post("/matches/result")
+@app.post("/matches/result", dependencies=[PROTECTED_DEPENDENCY])
 async def record_match_result(result: MatchResult, db: Session = Depends(get_db)):
     winner = db.query(PlayerDB).filter(PlayerDB.id == result.winner_id).first()
 
@@ -407,7 +417,7 @@ async def record_match_result(result: MatchResult, db: Session = Depends(get_db)
     db.commit()
     return {"message": "Match result recorded successfully"}
 
-@app.post("/reset")
+@app.post("/reset", dependencies=[PROTECTED_DEPENDENCY])
 async def reset_tournament(db: Session = Depends(get_db)):
     db.execute(played_opponents_association.delete())
     db.query(MatchRecord).delete()
