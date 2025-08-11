@@ -311,8 +311,8 @@ async def generate_matches(db: Session = Depends(get_db)):
                 possible_opponents = unpaired_players
 
         if possible_opponents:
-            # Sort by points to match with the closest opponent
-            best_opponent = sorted(possible_opponents, key=lambda p: p.points)[0]
+            # Sort by points (descending) to match with the closest opponent
+            best_opponent = sorted(possible_opponents, key=lambda p: p.points, reverse=True)[0]
             unpaired_players.remove(best_opponent)
             new_matches.append(Match(player1=player1, player2=best_opponent))
 
